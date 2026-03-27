@@ -1,90 +1,81 @@
 from flask import Flask, request, jsonify
+import tensorflow as tf
 import numpy as np
 from PIL import Image
-import tensorflow as tf
-import os
 import io
 
 app = Flask(__name__)
 
-# ================== LOAD MODEL ==================
-interpreter = tf.lite.Interpreter(model_path="plant_model.tflite")
+# ======================
+# 1. LOAD MODEL TFLITE
+# ======================
+MODEL_PATH = "plant_model.tflite"
+LABELS_PATH = "labels.txt"
+
+interpreter = tf.lite.Interpreter(model_path=MODEL_PATH)
 interpreter.allocate_tensors()
 
 input_details = interpreter.get_input_details()
 output_details = interpreter.get_output_details()
 
-print("INPUT SHAPE:", input_details[0]['shape'])  # debug
+# Load labels
+with open(LABELS_PATH, "r") as f:
+    labels = [line.strip() for line in f.readlines()]
 
-# ================== CLASS NAMES ==================
-class_names = [
-    "Tomato__Bacterial_spot",
-    "Tomato__Early_blight",
-    "Tomato__Late_blight",
-    "Tomato__Leaf_Mold",
-    "Tomato__Septoria_leaf_spot",
-    "Tomato__Spider_mites_Two-spotted_spider_mite",
-    "Tomato__Target_Spot",
-    "Tomato__Tomato_mosaic_virus",
-    "Tomato__Tomato_Yellow_Leaf_Curl_Virus",
-    "Tomato__healthy"
-]
 
-# ================== PREPROCESS ==================
-def preprocess(image: Image.Image) -> np.ndarray:
-    # 🔥 lấy size từ model (auto)
-    height = input_details[0]['shape'][1]
-    width = input_details[0]['shape'][2]
+# ======================
+# 2. PREPROCESS IMAGE
+# ======================
+def preprocess_image(image_bytes):
+    img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+    img = img.resize((224, 224))  # giống Colab
 
-    img = image.resize((width, height))
+    img_array = np.array(img).astype(np.float32)
+    img_array = np.expand_dims(img_array, axis=0)
+    img_array = img_array / 255.0  # chuẩn hóa giống bạn
 
-    img = np.array(img, dtype=np.float32) / 255.0
-    img = np.expand_dims(img, axis=0)
+    return img_array
 
-    return img
 
-# ================== PREDICT API ==================
-@app.route('/predict', methods=['POST'])
-def predict():
-    try:
-        # 👉 hỗ trợ cả form-data và ESP32 raw image
-        if request.files.get('image'):
-            image = Image.open(request.files['image']).convert("RGB")
-        else:
-            image = Image.open(io.BytesIO(request.data)).convert("RGB")
+# ======================
+# 3. PREDICT FUNCTION
+# ======================
+def predict(img_array):
+    interpreter.set_tensor(input_details[0]['index'], img_array)
+    interpreter.invoke()
 
-        # preprocess
-        img = preprocess(image)
+    output_data = interpreter.get_tensor(output_details[0]['index'])
+    result_idx = np.argmax(output_data[0])
+    confidence = float(output_data[0][result_idx]) * 100
+    label = labels[result_idx]
 
-        # predict
-        interpreter.set_tensor(input_details[0]['index'], img)
-        interpreter.invoke()
-        output = interpreter.get_tensor(output_details[0]['index'])
+    return result_idx, label, confidence
 
-        index = int(np.argmax(output[0]))
-        confidence = float(np.max(output[0]))
 
-        result = class_names[index]
-        display_name = result.replace("Tomato__", "").replace("_", " ").strip()
+# ======================
+# 4. API ROUTE
+# ======================
+@app.route("/predict", methods=["POST"])
+def predict_api():
+    if "file" not in request.files:
+        return jsonify({"error": "No file uploaded"}), 400
 
-        status = "Khỏe mạnh" if "healthy" in result.lower() else "Có bệnh"
+    file = request.files["file"]
+    img_bytes = file.read()
 
-        return jsonify({
-            "result": display_name,
-            "status": status,
-            "confidence": round(confidence * 100, 2),
-            "class_index": index
-        })
+    img_array = preprocess_image(img_bytes)
+    idx, label, conf = predict(img_array)
 
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    return jsonify({
+        "class_index": int(idx),
+        "result": label,
+        "confidence": round(conf, 2),
+        "status": "OK"
+    })
 
-# ================== HOME ==================
-@app.route('/')
-def home():
-    return "🍅 Tomato Disease Detection Server is running successfully!"
 
-# ================== RUN ==================
-if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port, debug=False)
+# ======================
+# 5. RUN SERVER
+# ======================
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000, debug=True)
