@@ -13,12 +13,23 @@ interpreter.allocate_tensors()
 input_details = interpreter.get_input_details()
 output_details = interpreter.get_output_details()
 
-# Thay bằng tên lớp thật của model bạn
-class_names = ["class1", "class2", "class3", ...]   # ← Sửa lại đầy đủ
+# Thứ tự class đúng theo alphabet
+class_names = [
+    "Tomato__Bacterial_spot",
+    "Tomato__Early_blight",
+    "Tomato__Late_blight",
+    "Tomato__Leaf_Mold",
+    "Tomato__Septoria_leaf_spot",
+    "Tomato__Spider_mites_Two-spotted_spider_mite",
+    "Tomato__Target_Spot",
+    "Tomato__Tomato_mosaic_virus",
+    "Tomato__Tomato_Yellow_Leaf_Curl_Virus",
+    "Tomato__healthy"          # ← healthy là class cuối cùng (index 9)
+]
 
 def preprocess(image: Image.Image) -> np.ndarray:
-    img = image.resize((224, 224))
-    img = np.array(img, dtype=np.float32) / 255.0     # Chuẩn hóa
+    img = image.resize((128, 128))
+    img = np.array(img, dtype=np.float32) / 255.0
     img = np.expand_dims(img, axis=0)
     return img
 
@@ -26,13 +37,13 @@ def preprocess(image: Image.Image) -> np.ndarray:
 @app.route('/predict', methods=['POST'])
 def predict():
     if 'image' not in request.files:
-        return jsonify({"error": "No image provided"}), 400
+        return jsonify({"error": "Vui lòng gửi ảnh với key = 'image'"}), 400
 
     file = request.files['image']
     try:
         image = Image.open(file).convert("RGB")
     except Exception:
-        return jsonify({"error": "Invalid image"}), 400
+        return jsonify({"error": "File không phải ảnh hợp lệ"}), 400
 
     img = preprocess(image)
 
@@ -43,8 +54,14 @@ def predict():
     index = int(np.argmax(output[0]))
     confidence = float(np.max(output[0]))
 
+    result = class_names[index]
+    display_name = result.replace("Tomato__", "").replace("_", " ")
+
+    status = "Khỏe mạnh" if "healthy" in result.lower() else "Có bệnh"
+
     return jsonify({
-        "result": class_names[index],
+        "result": display_name,
+        "status": status,
         "confidence": round(confidence * 100, 2),
         "class_index": index
     })
@@ -52,7 +69,7 @@ def predict():
 
 @app.route('/')
 def home():
-    return "AI Plant Classification Server is running!"
+    return " Tomato Disease Detection Server is running!"
 
 
 if __name__ == '__main__':
