@@ -6,14 +6,14 @@ import os
 
 app = Flask(__name__)
 
-# Load model
+# Load TFLite model
 interpreter = tf.lite.Interpreter(model_path="plant_model.tflite")
 interpreter.allocate_tensors()
 
 input_details = interpreter.get_input_details()
 output_details = interpreter.get_output_details()
 
-# Thứ tự class đúng theo alphabet
+# Thứ tự class đúng theo alphabet của thư mục train
 class_names = [
     "Tomato__Bacterial_spot",
     "Tomato__Early_blight",
@@ -24,7 +24,7 @@ class_names = [
     "Tomato__Target_Spot",
     "Tomato__Tomato_mosaic_virus",
     "Tomato__Tomato_Yellow_Leaf_Curl_Virus",
-    "Tomato__healthy"          # ← healthy là class cuối cùng (index 9)
+    "Tomato__healthy"
 ]
 
 def preprocess(image: Image.Image) -> np.ndarray:
@@ -40,6 +40,7 @@ def predict():
         return jsonify({"error": "Vui lòng gửi ảnh với key = 'image'"}), 400
 
     file = request.files['image']
+    
     try:
         image = Image.open(file).convert("RGB")
     except Exception:
@@ -55,7 +56,7 @@ def predict():
     confidence = float(np.max(output[0]))
 
     result = class_names[index]
-    display_name = result.replace("Tomato__", "").replace("_", " ")
+    display_name = result.replace("Tomato__", "").replace("_", " ").strip()
 
     status = "Khỏe mạnh" if "healthy" in result.lower() else "Có bệnh"
 
@@ -69,9 +70,10 @@ def predict():
 
 @app.route('/')
 def home():
-    return " Tomato Disease Detection Server is running!"
+    return " Tomato Disease Detection Server is running successfully!"
 
 
+# Chỉ chạy khi test local bằng lệnh: python app.py
 if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port, debug=False)
